@@ -1,3 +1,4 @@
+import { CronType } from '@daechanjo/models';
 import { PlaywrightModule } from '@daechanjo/playwright';
 import { RabbitMQModule } from '@daechanjo/rabbitmq';
 import { UtilModule } from '@daechanjo/util';
@@ -11,6 +12,7 @@ import Redis from 'ioredis';
 import { redisConfig } from './config/redis.config';
 import { TypeormConfig } from './config/typeorm.config';
 import { PriceCoupangService } from './core/price.coupang.service';
+import { PriceService } from './core/price.service';
 import { CalculateMarginAndAdjustPricesProvider } from './core/provider/calculateMarginAndAdjustPrice.provider';
 import { CoupangProductEntity } from './infrastructure/entities/coupangProduct.entity';
 import { OnchItemEntity } from './infrastructure/entities/onchItem.entity';
@@ -34,21 +36,28 @@ import { PriceRepository } from './infrastructure/price.repository';
     RabbitMQModule,
   ],
   controllers: [],
-  providers: [PriceCoupangService, PriceRepository, CalculateMarginAndAdjustPricesProvider],
+  providers: [
+    PriceService,
+    PriceCoupangService,
+    PriceRepository,
+    CalculateMarginAndAdjustPricesProvider,
+  ],
 })
 export class AppModule implements OnApplicationBootstrap {
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private readonly configService: ConfigService,
+    private readonly priceService: PriceService,
     private readonly priceCoupangService: PriceCoupangService,
   ) {}
 
   async onApplicationBootstrap() {
     setTimeout(async () => {
       await this.redis.del(`lock:${this.configService.get<string>('STORE')}:coupang:price`);
-      await this.redis.del(`lock:${this.configService.get<string>('STORE')}:naver:price`);
+      // await this.redis.del(`lock:${this.configService.get<string>('STORE')}:naver:price`);
 
-      await this.priceCoupangService.initCoupangPriceControl('B394C3B783');
+      await this.priceService.initCoupangPriceControl();
+      // await this.priceCoupangService.calculateMarginAndAdjustPrices('0E38392D5E', CronType.PRICE);
     }, 100);
   }
 }

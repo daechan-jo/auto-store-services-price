@@ -1,54 +1,60 @@
+import { AdjustData, OnchWithCoupangProduct, ProcessProductData } from '@daechanjo/models';
+import { CoupangItem } from '@daechanjo/models/dist/interfaces/data/coupangItem.interface';
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class CalculateMarginAndAdjustPricesProvider {
-  processProductData(product: any, onchItem: any, matchedCoupangItem: any) {
+  processProductData(
+    item: CoupangItem, // api로 조회한거
+    matchedItem: { itemName: string; consumerPrice: number; sellerPrice: number }, // db에서 나온 아이템
+    matchedProduct: OnchWithCoupangProduct, // db에서 나온 구조체
+  ): ProcessProductData {
     return {
-      sellerProductId: product.sellerProductId,
-      vendorItemId: matchedCoupangItem.vendorItemId,
-      itemName: onchItem.itemName,
-      coupangSalePrice: +matchedCoupangItem.salePrice,
-      onchSellerPrice: +onchItem.sellerPrice,
-      onchConsumerPrice: +onchItem.consumerPrice,
-      coupangShippingCost: +product.coupangShippingCost,
-      onchShippingCost: +product.onchShippingCost,
-      coupangIsWinner: product.coupangIsWinner,
+      sellerProductId: matchedProduct.sellerProductId,
+      vendorItemId: item.vendorItemId,
+      itemName: item.itemName,
+      coupangSalePrice: +item.salePrice,
+      onchSellerPrice: +matchedItem.sellerPrice,
+      onchConsumerPrice: +matchedItem.consumerPrice,
+      coupangIsWinner: matchedProduct.coupangIsWinner,
     };
   }
 
-  calculatePrices(processedData: any) {
-    const salePrice = Math.round(
-      processedData.coupangSalePrice -
-        processedData.coupangSalePrice / 10.8 +
-        processedData.coupangShippingCost,
-    );
-    // 도매가
-    const wholesalePrice = processedData.onchSellerPrice + processedData.onchShippingCost;
+  calculatePrices(processedData: ProcessProductData) {
+    // 이익 ( - 10.8% 수수료 )
+    const fee = processedData.coupangSalePrice * 0.108;
+    const profit = Math.round(processedData.coupangSalePrice - fee);
 
-    // 순수익 ( 도매가 - 판매가 )
-    const currentMargin = salePrice - wholesalePrice;
+    // 순수익
+    const netProfit = profit - processedData.onchSellerPrice;
 
     // 목표 최소 마진
-    const targetMargin = Math.round(wholesalePrice * 0.07); // 최소 마진 7%
+    const minimumNetProfit = Math.round(processedData.onchSellerPrice * 0.07);
 
-    return { salePrice, currentMargin, targetMargin };
+    return { netProfit, minimumNetProfit };
   }
 
-  adjustPrice(salePrice: number, currentMargin: number, targetMargin: number, processedData: any) {
-    // 위너가 아니고 현재 마진이 목표 마진보다 높다면
-    if (currentMargin > targetMargin && !processedData.coupangIsWinner) {
-      const newPrice = salePrice * 0.97;
+  adjustPrice(
+    netProfit: number,
+    minimumNetProfit: number,
+    processedData: ProcessProductData,
+  ): AdjustData | null {
+    // 위너가 아니고 현재 순이익이 최소 목표마진보다 높다면
+    if (!processedData.coupangIsWinner && netProfit > minimumNetProfit * 1.03) {
+      // 새로운 가격은 원래 가격보다 3% 낮게 설정
+      const newPrice = processedData.coupangSalePrice * 0.97;
       const roundedPrice = Math.round(newPrice / 10) * 10;
 
       return {
         sellerProductId: processedData.sellerProductId,
         vendorItemId: processedData.vendorItemId,
         itemName: processedData.itemName,
-        action: 'down',
         newPrice: roundedPrice,
         currentPrice: processedData.coupangSalePrice,
         currentIsWinner: processedData.coupangIsWinner,
       };
+    } else {
+      return null;
     }
   }
 }

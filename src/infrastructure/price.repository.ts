@@ -6,12 +6,12 @@ import { CoupangProductEntity } from './entities/coupangProduct.entity';
 export class PriceRepository {
   constructor(
     @InjectRepository(CoupangProductEntity)
-    private readonly coupangRepository: Repository<CoupangProductEntity>,
+    private readonly coupangProductRepository: Repository<CoupangProductEntity>,
     private readonly dataSource: DataSource,
   ) {}
 
-  async getProducts() {
-    const subQuery = this.coupangRepository
+  async fetchCoupangProductsWithOnchData() {
+    const subQuery = this.coupangProductRepository
       .createQueryBuilder('c')
       .select([
         'c.id AS id',
@@ -49,61 +49,6 @@ export class PriceRepository {
           )
         ) FILTER (WHERE i.item_name IS NOT NULL), '[]'
       )`,
-        'onchItems',
-      )
-      .from('(' + subQuery.getQuery() + ')', 'up')
-      .innerJoin('onch_product', 'o', 'up."productCode" = o.product_code')
-      .leftJoin('onch_item', 'i', 'o.id = i.onchProductId')
-      .where('o.seller_price IS NOT NULL')
-      .andWhere('o.shipping_cost IS NOT NULL')
-      .groupBy(
-        'up.id, up."sellerProductId", up."productCode", up.price, up."shippingCost", up."isWinner", o.seller_price, o.shipping_cost',
-      )
-      .orderBy('up.id', 'ASC')
-      .setParameters(subQuery.getParameters())
-      .getRawMany();
-  }
-
-  async fetchCoupangProductsWithOnchData() {
-    const subQuery = this.dataSource
-      .createQueryBuilder()
-      .select([
-        'c.id AS id',
-        'c.seller_product_id AS "sellerProductId"',
-        'c.product_code AS "productCode"',
-        'c.price AS price',
-        'c.shipping_cost AS "shippingCost"',
-        'c.is_winner AS "isWinner"',
-      ])
-      .from('coupang_product', 'c') // 테이블명 직접 지정
-      .where('c.id IS NOT NULL')
-      .andWhere('c.product_code IS NOT NULL')
-      .andWhere('c.price IS NOT NULL')
-      .andWhere('c.shipping_cost IS NOT NULL')
-      .andWhere('c.is_winner IS NOT NULL')
-      .orderBy('c.id', 'ASC');
-
-    // 메인 쿼리는 기존과 동일, 서브쿼리만 변경됨
-    return await this.dataSource
-      .createQueryBuilder()
-      .select('up.id', 'coupangId')
-      .addSelect('up."sellerProductId"', 'sellerProductId')
-      .addSelect('up."productCode"', 'coupangProductCode')
-      .addSelect('up.price', 'coupangPrice')
-      .addSelect('up."shippingCost"', 'coupangShippingCost')
-      .addSelect('up."isWinner"', 'coupangIsWinner')
-      .addSelect('o.sellerPrice', 'onchSellerPrice')
-      .addSelect('o.shippingCost', 'onchShippingCost')
-      .addSelect(
-        `COALESCE(
-      json_agg(
-        json_build_object(
-          'itemName', i.item_name,
-          'consumerPrice', i.consumer_price,
-          'sellerPrice', i.seller_price
-        )
-      ) FILTER (WHERE i.item_name IS NOT NULL), '[]'
-    )`,
         'onchItems',
       )
       .from('(' + subQuery.getQuery() + ')', 'up')
