@@ -134,6 +134,7 @@ export class PriceCoupangService {
                   matchedProducts[0],
                 );
 
+
               // 판매가, 순수익, 목표 최소마진
               const { netProfit, minimumNetProfit } =
                 this.calculateMarginAndAdjustPricesProvider.calculatePrices(processedData);
@@ -145,12 +146,12 @@ export class PriceCoupangService {
                   processedData,
                 );
 
-              if (adjustment === null) continue;
-
-              if (!adjustment || adjustment.newPrice < 7000 || adjustment.newPrice > 500000) {
+              if (!adjustment || adjustment.newPrice < 5000 || adjustment.newPrice > 500000) {
                 deleteProducts.push(product);
                 break;
               }
+
+							if(adjustment.currentIsWinner) continue;
 
               if (adjustment && !seenVendorItemIds.has(adjustment.vendorItemId)) {
                 seenVendorItemIds.add(adjustment.vendorItemId);
@@ -187,7 +188,8 @@ export class PriceCoupangService {
       type: type,
     });
 
-    await this.deletePoorConditionProducts(cronId, type, deleteProducts);
+    if (deleteProducts.length > 0)
+      await this.deletePoorConditionProducts(cronId, type, deleteProducts);
   }
 
   async deletePoorConditionProducts(

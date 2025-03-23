@@ -53,8 +53,6 @@ export class CalculateMarginAndAdjustPricesProvider {
         currentPrice: processedData.coupangSalePrice,
         currentIsWinner: processedData.coupangIsWinner,
       };
-    } else {
-      return null;
     }
   }
 }
