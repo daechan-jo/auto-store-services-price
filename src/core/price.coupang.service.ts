@@ -151,7 +151,8 @@ export class PriceCoupangService {
                 break;
               }
 
-							if(adjustment.currentIsWinner) continue;
+							// 이미 위너이거나 승인 대기중이라면 패스
+							if(adjustment.currentIsWinner || adjustment.vendorItemId === null) continue;
 
               if (adjustment && !seenVendorItemIds.has(adjustment.vendorItemId)) {
                 seenVendorItemIds.add(adjustment.vendorItemId);
