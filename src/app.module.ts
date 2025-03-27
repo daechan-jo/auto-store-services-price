@@ -14,6 +14,7 @@ import { TypeormConfig } from './config/typeorm.config';
 import { PriceCoupangService } from './core/price.coupang.service';
 import { PriceService } from './core/price.service';
 import { CalculateMarginAndAdjustPricesProvider } from './core/provider/calculateMarginAndAdjustPrice.provider';
+import { CoupangComparisonEntity } from './infrastructure/entities/coupangComparison.entity';
 import { CoupangProductEntity } from './infrastructure/entities/coupangProduct.entity';
 import { OnchItemEntity } from './infrastructure/entities/onchItem.entity';
 import { OnchProductEntity } from './infrastructure/entities/onchProduct.entity';
@@ -27,7 +28,12 @@ import { PriceRepository } from './infrastructure/price.repository';
       envFilePath: '/Users/daechanjo/codes/project/auto-store/.env',
     }),
     TypeOrmModule.forRootAsync(TypeormConfig),
-    TypeOrmModule.forFeature([CoupangProductEntity, OnchProductEntity, OnchItemEntity]),
+    TypeOrmModule.forFeature([
+      CoupangProductEntity,
+      OnchProductEntity,
+      OnchItemEntity,
+      CoupangComparisonEntity,
+    ]),
     RedisModule.forRootAsync({
       useFactory: () => redisConfig,
     }),
@@ -49,6 +55,7 @@ export class AppModule implements OnApplicationBootstrap {
     private readonly configService: ConfigService,
     private readonly priceService: PriceService,
     private readonly priceCoupangService: PriceCoupangService,
+    private readonly priceRepository: PriceRepository,
   ) {}
 
   async onApplicationBootstrap() {
@@ -56,8 +63,9 @@ export class AppModule implements OnApplicationBootstrap {
       await this.redis.del(`lock:${this.configService.get<string>('STORE')}:coupang:price`);
       // await this.redis.del(`lock:${this.configService.get<string>('STORE')}:naver:price`);
 
+      // await this.priceCoupangService.calculateMarginAndAdjustPrices('67430FFABF', CronType.PRICE);
+
       await this.priceService.initCoupangPriceControl();
-      // await this.priceCoupangService.calculateMarginAndAdjustPrices('0E38392D5E', CronType.PRICE);
     }, 100);
   }
 }

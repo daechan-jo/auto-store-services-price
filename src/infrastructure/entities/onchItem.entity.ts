@@ -1,5 +1,12 @@
 import { Type } from '@daechanjo/models';
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, CreateDateColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  ManyToOne,
+  CreateDateColumn,
+  JoinColumn,
+} from 'typeorm';
 
 import { OnchProductEntity } from './onchProduct.entity';
 
@@ -20,6 +27,7 @@ export class OnchItemEntity {
   @ManyToOne(() => OnchProductEntity, (onchProduct) => onchProduct.onchItems, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'onch_product_id' })
   onchProduct: Type<OnchProductEntity>;
 
   @CreateDateColumn({ name: 'created_at' })
