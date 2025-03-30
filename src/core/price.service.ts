@@ -51,15 +51,14 @@ export class PriceService {
       await this.redis.del(lockKey);
       console.log(`${CronType.PRICE}${currentCronId}: 종료`);
 
-      // 함수 완료 후 3시간 후에 다시 실행
-      const threeHoursInMs = 3 * 60 * 60 * 1000;
-      const nextRunTime = new Date(Date.now() + threeHoursInMs);
+      const hoursInMs = 3 * 60 * 60 * 1000;
+      const nextRunTime = new Date(Date.now() + hoursInMs);
       console.log(`${CronType.PRICE}: 다음 실행 예약됨 - ${nextRunTime}`);
 
       setTimeout(() => {
         console.log(`${CronType.PRICE}: 예약된 실행 시작`);
         this.initCoupangPriceControl();
-      }, threeHoursInMs);
+      }, hoursInMs);
     }
   }
 }

@@ -1,11 +1,4 @@
-import {
-  AdjustData,
-  CoupangComparisonWithOnchData,
-  CoupangProduct,
-  CronType,
-  OnchWithCoupangProduct,
-  ProcessProductData,
-} from '@daechanjo/models';
+import { AdjustData, CoupangComparisonWithOnchData, CronType } from '@daechanjo/models';
 import { RabbitMQService } from '@daechanjo/rabbitmq';
 import { UtilService } from '@daechanjo/util';
 import { Injectable } from '@nestjs/common';
@@ -71,7 +64,8 @@ export class PriceCoupangService {
 
   async calculateMarginAndAdjustPrices(cronId: string, type: string) {
     const productsBatch: AdjustData[] = [];
-    const deleteProductsSet = new Set<CoupangComparisonWithOnchData>();
+    // const deleteProductsSet = new Set<CoupangComparisonWithOnchData>();
+    const deleteProductsMap = new Map<string, CoupangComparisonWithOnchData>();
 
     console.log(`${CronType.PRICE}${cronId}: 새로운 판매가 연산 시작...`);
 
@@ -84,36 +78,49 @@ export class PriceCoupangService {
         console.log(
           `${type}${cronId}: 상품 처리 중 ${i + 1}/${comparisonData.length} (${progressPercentage.toFixed(2)}%)`,
         );
+      }
 
-        const itemName = this.utilService.extractLastPart(data.productName);
-        const matchedItem = this.calculateMarginAndAdjustPricesProvider.findMatchingOnchItem(
-          data,
-          itemName,
+      const productInfo = this.utilService.extractProductInfo(data.productName);
+      const matchedItem = this.calculateMarginAndAdjustPricesProvider.findMatchingOnchItem(
+        data,
+        productInfo,
+      );
+
+      if (!matchedItem) {
+        console.log(
+          `${type}${cronId}: 매칭된 아이템을 찾지 못했습니다. ${data.productName}\n${data.onchProduct}`,
         );
+        continue;
+      }
 
-        const adjustment: AdjustData = this.calculateMarginAndAdjustPricesProvider.adjustPrice(
-          matchedItem,
-          data,
-        );
+      if (+data.winnerPrice > matchedItem.consumerPrice) {
+        continue;
+      }
 
-        if (
-          !adjustment ||
-          adjustment.newPrice < this.configService.get<number>('PRODUCT_MIN_PRICE') ||
-          adjustment.newPrice > this.configService.get<number>('PRODUCT_MAX_PRICE')
-        ) {
-          deleteProductsSet.add(data);
-          continue;
-        }
+      const adjustment: AdjustData | null = this.calculateMarginAndAdjustPricesProvider.adjustPrice(
+        matchedItem,
+        data,
+      );
 
-        productsBatch.push(adjustment);
-        if (productsBatch.length >= 50) {
-          await this.rabbitmqService.send('coupang-queue', 'saveUpdateCoupangItems', {
-            cronId,
-            type,
-            items: productsBatch,
-          });
-          productsBatch.length = 0;
-        }
+      if (
+        !adjustment ||
+        adjustment.newPrice < this.configService.get<number>('PRODUCT_MIN_PRICE') ||
+        adjustment.newPrice > this.configService.get<number>('PRODUCT_MAX_PRICE')
+      ) {
+        deleteProductsMap.set(data.externalVendorSkuCode, data);
+        continue;
+      }
+      if (adjustment.newPrice === adjustment.currentPrice) continue;
+
+      productsBatch.push(adjustment);
+      if (productsBatch.length >= 50) {
+        console.log(`${type}${cronId}: 배치 저장`);
+        await this.rabbitmqService.send('coupang-queue', 'saveUpdateCoupangItems', {
+          cronId,
+          type,
+          items: productsBatch,
+        });
+        productsBatch.length = 0;
       }
     }
     if (productsBatch.length > 0) {
@@ -131,11 +138,10 @@ export class PriceCoupangService {
       type: type,
     });
 
-    // todo 상품 전체 삭제가 아니라, 해당 아이템만 중지. 만약 모든 아이템이 중지중이라면 상품 삭제.
-    // todo 쿠팡 상품 조회 -> item vendorIds 추출 -> 아이템 순회하면서 판매상태 체크 -> 전부 false 이면 상품 삭제
-    // const deleteProductsArray = Array.from(deleteProductsSet);
-    // if (deleteProductsArray.length > 0)
-    //   await this.deletePoorConditionProducts(cronId, type, deleteProductsArray);
+    const deleteProductsArray = Array.from(deleteProductsMap.values());
+    console.log(`${type}${cronId}: 삭제대상 아이템(상품) ${deleteProductsArray.length} 개`);
+    if (deleteProductsArray.length > 0)
+      await this.deletePoorConditionProducts(cronId, type, deleteProductsArray);
   }
 
   async deletePoorConditionProducts(
@@ -150,24 +156,25 @@ export class PriceCoupangService {
       cronId: cronId,
       store: this.configService.get<string>('STORE'),
       type: CronType.PRICE,
-      products: deleteProducts,
+      data: deleteProducts,
     });
 
+    console.log(`${type}${cronId}: 쿠팡 조건 미충족 상품 삭제 시작`);
     const chunkSize = 500; // 한 번에 전송할 데이터 개수
 
     for (let i = 0; i < deleteProducts.length; i += chunkSize) {
       const chunk = deleteProducts.slice(i, i + chunkSize);
-      console.log(`${type}${cronId}: ${chunk.length}/${deleteProducts.length} 진행중`);
+      console.log(`${type}${cronId}: ${i}/${deleteProducts.length} 진행중`);
 
-      await this.rabbitmqService.send('coupang-queue', 'stopSaleForMatchedProducts', {
+      await this.rabbitmqService.send('coupang-queue', 'stopSaleBySellerProductId', {
         cronId,
         type,
-        products: chunk,
+        data: chunk,
       });
-      await this.rabbitmqService.send('coupang-queue', 'deleteProducts', {
+      await this.rabbitmqService.send('coupang-queue', 'deleteBySellerProductId', {
         cronId,
         type,
-        matchedProducts: chunk,
+        data: chunk,
       });
     }
 

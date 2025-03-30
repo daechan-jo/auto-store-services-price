@@ -8,6 +8,9 @@ export class CoupangComparisonEntity {
   @Column({ name: 'product_id', type: 'bigint' })
   productId: number;
 
+  @Column({ name: 'vendor_inventory_id', type: 'bigint' })
+  vendorInventoryId: number;
+
   @Column({ name: 'vendor_item_id', type: 'bigint' })
   vendorItemId: number;
 
