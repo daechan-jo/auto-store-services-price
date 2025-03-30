@@ -63,7 +63,7 @@ export class AppModule implements OnApplicationBootstrap {
       await this.redis.del(`lock:${this.configService.get<string>('STORE')}:coupang:price`);
       // await this.redis.del(`lock:${this.configService.get<string>('STORE')}:naver:price`);
 
-      // await this.priceCoupangService.calculateMarginAndAdjustPrices('67430FFABF', CronType.PRICE);
+      // await this.priceCoupangService.calculateMarginAndAdjustPrices('test', CronType.PRICE);
 
       await this.priceService.initCoupangPriceControl();
     }, 100);
