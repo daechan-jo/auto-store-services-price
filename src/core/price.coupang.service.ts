@@ -38,18 +38,27 @@ export class PriceCoupangService {
       // 크롤링중 새로운 상품 등록 방지
       await this.redis.set(crawlingLockKey, Date.now().toString(), 'NX');
 
-      console.log(`${CronType.PRICE}${cronId}: 온채널 등록상품 크롤링 시작`);
-      await this.rabbitmqService.send('onch-queue', 'crawlOnchRegisteredProducts', {
-        cronId,
-        store,
-        type: CronType.PRICE,
-      });
+      console.log(`${CronType.PRICE}${cronId}: 온채널/쿠팡 판매상품 크롤링 시작`);
+      await Promise.all([
+        this.rabbitmqService.send('onch-queue', 'crawlOnchRegisteredProducts', {
+          cronId,
+          store,
+          type: CronType.PRICE,
+        }),
 
-      console.log(`${CronType.PRICE}${cronId}: 쿠팡 가격비교 크롤링 시작`);
-      await this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
-        cronId: cronId,
-        type: CronType.PRICE,
-      });
+        this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
+          cronId: cronId,
+          type: CronType.PRICE,
+          winnerStatus: 'LOSE_NOT_SUPPRESSED',
+        }),
+
+        // 위너상품의 경우 최소가, 최대가 미충족 상품 제거를 위해 같이 크롤링
+        this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
+          cronId: cronId,
+          type: CronType.PRICE,
+          winnerStatus: 'WIN_NOT_SUPPRESSED',
+        }),
+      ]);
 
       // 크롤링 락 해제
       await this.redis.del(crawlingLockKey);
@@ -64,7 +73,6 @@ export class PriceCoupangService {
 
   async calculateMarginAndAdjustPrices(cronId: string, type: string) {
     const productsBatch: AdjustData[] = [];
-    // const deleteProductsSet = new Set<CoupangComparisonWithOnchData>();
     const deleteProductsMap = new Map<string, CoupangComparisonWithOnchData>();
 
     console.log(`${CronType.PRICE}${cronId}: 새로운 판매가 연산 시작...`);
@@ -93,7 +101,10 @@ export class PriceCoupangService {
         continue;
       }
 
-      if (+data.winnerPrice > matchedItem.consumerPrice) {
+      if (
+        +data.winnerPrice > matchedItem.consumerPrice ||
+        data.winnerVendorId === this.configService.get<string>('COUPANG_VENDOR_ID')
+      ) {
         continue;
       }
 
@@ -103,6 +114,7 @@ export class PriceCoupangService {
       );
 
       if (
+        adjustment === null ||
         !adjustment ||
         adjustment.newPrice < this.configService.get<number>('PRODUCT_MIN_PRICE') ||
         adjustment.newPrice > this.configService.get<number>('PRODUCT_MAX_PRICE')
@@ -140,6 +152,7 @@ export class PriceCoupangService {
 
     const deleteProductsArray = Array.from(deleteProductsMap.values());
     console.log(`${type}${cronId}: 삭제대상 아이템(상품) ${deleteProductsArray.length} 개`);
+
     if (deleteProductsArray.length > 0)
       await this.deletePoorConditionProducts(cronId, type, deleteProductsArray);
   }
