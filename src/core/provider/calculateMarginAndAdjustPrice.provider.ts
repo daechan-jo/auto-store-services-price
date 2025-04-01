@@ -106,11 +106,17 @@ export class CalculateMarginAndAdjustPricesProvider {
       }
     }
 
-    // '본품'이라는 아이템 찾기
+    // '본품'이라는 단일 아이템 찾기
     if (!matchedItem) {
-      matchedItem = data.onchProduct.onchItems.find(
-        (item) => item.itemName && item.itemName.trim() === '본품',
-      );
+      matchedItem = data.onchProduct.onchItems.find((item) => {
+        const itemName = item.itemName && item.itemName.trim();
+        return (
+          itemName === '본품' ||
+          itemName === '단일품목' ||
+          itemName === '단일상품' ||
+          itemName === '단품'
+        );
+      });
     }
 
     if (!matchedItem) {

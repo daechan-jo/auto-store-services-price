@@ -1,5 +1,5 @@
 node_modules
-.eslintrc.mjs
+.eslintrc.json
 webpack-hmr.config.cjs
 dist
 .idea
