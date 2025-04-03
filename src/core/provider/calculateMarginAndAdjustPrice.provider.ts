@@ -11,6 +11,7 @@ import * as stringSimilarity from 'string-similarity';
 
 @Injectable()
 export class CalculateMarginAndAdjustPricesProvider {
+  // todo delete
   processProductData(
     item: CoupangItem, // api로 조회한거
     matchedItem: { itemName: string; consumerPrice: number; sellerPrice: number }, // db에서 나온 아이템

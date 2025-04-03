@@ -1,4 +1,9 @@
-import { AdjustData, CoupangComparisonWithOnchData, CronType } from '@daechanjo/models';
+import {
+  AdjustData,
+  CoupangComparisonWithOnchData,
+  JobType,
+  WinnerStatus,
+} from '@daechanjo/models';
 import { RabbitMQService } from '@daechanjo/rabbitmq';
 import { UtilService } from '@daechanjo/util';
 import { Injectable } from '@nestjs/common';
@@ -20,62 +25,81 @@ export class PriceCoupangService {
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
-  async coupangPriceControl(cronId: string) {
+  async coupangPriceControl(jobId: string) {
     const store = this.configService.get<string>('STORE');
     const crawlingLockKey = `lock:${this.configService.get<string>('STORE')}:coupang:price:crawl`;
+    let acquired = false;
+    let attemptCount = 0;
+    const retryDelay = 60000;
 
     try {
-      console.log(`${CronType.PRICE}${cronId}: 온채널/쿠팡 크롤링 데이터 삭제`);
+      console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 크롤링 데이터 삭제`);
       await this.rabbitmqService.send('onch-queue', 'clearOnchProducts', {
-        cronId: cronId,
-        type: CronType.PRICE,
+        jobId: jobId,
+        type: JobType.PRICE,
       });
       await this.rabbitmqService.send('coupang-queue', 'clearCoupangComparison', {
-        cronId: cronId,
-        type: CronType.PRICE,
+        jobId: jobId,
+        type: JobType.PRICE,
       });
 
       // 크롤링중 새로운 상품 등록 방지
-      await this.redis.set(crawlingLockKey, Date.now().toString(), 'NX');
+      while (!acquired) {
+        const result = await this.redis.set(crawlingLockKey, Date.now().toString(), 'NX');
+        acquired = result === 'OK';
 
-      console.log(`${CronType.PRICE}${cronId}: 온채널/쿠팡 판매상품 크롤링 시작`);
+        if (!acquired) {
+          attemptCount++;
+          console.log(`${JobType.PRICE}${jobId}: 락 획득 시도 중... (시도 횟수: ${attemptCount})`);
+          await new Promise((resolve) => setTimeout(resolve, retryDelay)); // 대기
+        }
+      }
+
+      console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 판매상품 크롤링 시작`);
       await Promise.all([
         this.rabbitmqService.send('onch-queue', 'crawlOnchRegisteredProducts', {
-          cronId,
-          store,
-          type: CronType.PRICE,
+          jobId: jobId,
+          jobType: JobType.PRICE,
+          store: store,
         }),
 
         this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
-          cronId: cronId,
-          type: CronType.PRICE,
-          winnerStatus: 'LOSE_NOT_SUPPRESSED',
+          jobId: jobId,
+          jobType: JobType.PRICE,
+          data: WinnerStatus.LOSE_NOT_SUPPRESSED,
         }),
 
         // 위너상품의 경우 최소가, 최대가 미충족 상품 제거를 위해 같이 크롤링
         this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
-          cronId: cronId,
-          type: CronType.PRICE,
-          winnerStatus: 'WIN_NOT_SUPPRESSED',
+          jobId: jobId,
+          type: JobType.PRICE,
+          data: WinnerStatus.WIN_NOT_SUPPRESSED,
+        }),
+
+        // 노출 제한 상품도
+        this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
+          jobId: jobId,
+          type: JobType.PRICE,
+          data: WinnerStatus.ANY_SUPPRESSED,
         }),
       ]);
 
       // 크롤링 락 해제
       await this.redis.del(crawlingLockKey);
-      await this.calculateMarginAndAdjustPrices(cronId, CronType.PRICE);
+      await this.calculateMarginAndAdjustPrices(jobId, JobType.PRICE);
     } catch (error) {
       console.error(
-        `${CronType.ERROR}${CronType.PRICE}${cronId}: 쿠팡 자동가격조절 오류 발생\n`,
+        `${JobType.ERROR}${JobType.PRICE}${jobId}: 쿠팡 자동가격조절 오류 발생\n`,
         error,
       );
     }
   }
 
-  async calculateMarginAndAdjustPrices(cronId: string, type: string) {
+  async calculateMarginAndAdjustPrices(jobId: string, jobType: string) {
     const productsBatch: AdjustData[] = [];
     const deleteProductsMap = new Map<string, CoupangComparisonWithOnchData>();
 
-    console.log(`${CronType.PRICE}${cronId}: 새로운 판매가 연산 시작...`);
+    console.log(`${JobType.PRICE}${jobId}: 새로운 판매가 연산 시작...`);
 
     const comparisonData: CoupangComparisonWithOnchData[] =
       await this.priceRepository.findCoupangComparisonWithOnchData({});
@@ -84,7 +108,7 @@ export class PriceCoupangService {
       if (i % Math.ceil(comparisonData.length / 10) === 0) {
         const progressPercentage = ((i + 1) / comparisonData.length) * 100;
         console.log(
-          `${type}${cronId}: 상품 처리 중 ${i + 1}/${comparisonData.length} (${progressPercentage.toFixed(2)}%)`,
+          `${jobType}${jobId}: 상품 처리 중 ${i + 1}/${comparisonData.length} (${progressPercentage.toFixed(2)}%)`,
         );
       }
 
@@ -96,7 +120,7 @@ export class PriceCoupangService {
 
       if (!matchedItem) {
         console.log(
-          `${type}${cronId}: 매칭된 아이템을 찾지 못했습니다. ${data.productName}\n${data.onchProduct}`,
+          `${jobType}${jobId}: 매칭된 아이템을 찾지 못했습니다. ${data.productName}\n${data.onchProduct}`,
         );
         continue;
       }
@@ -126,71 +150,71 @@ export class PriceCoupangService {
 
       productsBatch.push(adjustment);
       if (productsBatch.length >= 50) {
-        console.log(`${type}${cronId}: 배치 저장`);
+        console.log(`${jobType}${jobId}: 배치 저장`);
         await this.rabbitmqService.send('coupang-queue', 'saveUpdateCoupangItems', {
-          cronId,
-          type,
-          items: productsBatch,
+          jobId,
+          jobType,
+          data: productsBatch,
         });
         productsBatch.length = 0;
       }
     }
     if (productsBatch.length > 0) {
       await this.rabbitmqService.send('coupang-queue', 'saveUpdateCoupangItems', {
-        cronId,
-        type,
-        items: productsBatch,
+        jobId,
+        jobType,
+        data: productsBatch,
       });
     }
 
-    console.log(`${type}${cronId}: 연산 종료`);
-    console.log(`${type}${cronId}: ✉️coupang-coupangProductsPriceControl`);
+    console.log(`${jobType}${jobId}: 연산 종료`);
+    console.log(`${jobType}${jobId}: ✉️coupang-coupangProductsPriceControl`);
     await this.rabbitmqService.emit('coupang-queue', 'coupangProductsPriceControl', {
-      cronId: cronId,
-      type: type,
+      jobId: jobId,
+      jobType: jobType,
     });
 
     const deleteProductsArray = Array.from(deleteProductsMap.values());
-    console.log(`${type}${cronId}: 삭제대상 아이템(상품) ${deleteProductsArray.length} 개`);
+    console.log(`${jobType}${jobId}: 삭제대상 아이템(상품) ${deleteProductsArray.length} 개`);
 
     if (deleteProductsArray.length > 0)
-      await this.deletePoorConditionProducts(cronId, type, deleteProductsArray);
+      await this.deletePoorConditionProducts(jobId, jobType, deleteProductsArray);
   }
 
   async deletePoorConditionProducts(
-    cronId: string,
-    type: string,
+    jobId: string,
+    jobType: string,
     deleteProducts: CoupangComparisonWithOnchData[],
   ) {
-    console.log(`${type}${cronId}: 조건미충족 상품 삭제 시작`);
+    console.log(`${jobType}${jobId}: 조건미충족 상품 삭제 시작`);
 
-    console.log(`${type}${cronId}: ✉️onch-deleteProducts`);
+    console.log(`${jobType}${jobId}: ✉️onch-deleteProducts`);
     await this.rabbitmqService.emit('onch-queue', 'deleteProducts', {
-      cronId: cronId,
+      jobId: jobId,
+      jobType: JobType.PRICE,
       store: this.configService.get<string>('STORE'),
-      type: CronType.PRICE,
       data: deleteProducts,
     });
 
-    console.log(`${type}${cronId}: 쿠팡 조건 미충족 상품 삭제 시작`);
+    console.log(`${jobType}${jobId}: 쿠팡 조건 미충족 상품 삭제 시작`);
     const chunkSize = 500; // 한 번에 전송할 데이터 개수
 
     for (let i = 0; i < deleteProducts.length; i += chunkSize) {
       const chunk = deleteProducts.slice(i, i + chunkSize);
-      console.log(`${type}${cronId}: ${i}/${deleteProducts.length} 진행중`);
+      console.log(`${jobType}${jobId}: ${i}/${deleteProducts.length} 진행중`);
 
       await this.rabbitmqService.send('coupang-queue', 'stopSaleBySellerProductId', {
-        cronId,
-        type,
+        jobId,
+        jobType,
         data: chunk,
       });
       await this.rabbitmqService.send('coupang-queue', 'deleteBySellerProductId', {
-        cronId,
-        type,
+        jobId,
+        jobType,
         data: chunk,
       });
     }
 
-    console.log(`${type}${cronId}: 조건미충족 상품 삭제 종료`);
+    console.log(`${jobType}${jobId}: 조건미충족 상품 삭제 종료`);
   }
 }
