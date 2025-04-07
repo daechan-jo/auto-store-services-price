@@ -1,3 +1,5 @@
+## [1.0.4](https://github.com/daechan-jo/auto-store-services-price/compare/v1.0.3...v1.0.4) (2025-04-07)
+
 ## [1.0.3](https://github.com/daechan-jo/auto-store-services-price/compare/v1.0.2...v1.0.3) (2025-04-03)
 
 ## [1.0.2](https://github.com/daechan-jo/auto-store-services-price/compare/v1.0.1...v1.0.2) (2025-04-01)
