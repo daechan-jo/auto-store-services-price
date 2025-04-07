@@ -43,6 +43,9 @@ export class CoupangComparisonEntity {
   @Column({ name: 'winner_shipping_fee', type: 'varchar' })
   winnerShippingFee: string;
 
+  @Column({ name: 'winner_coupon', type: 'varchar' })
+  winnerCoupon: string;
+
   // 현재 내 가격
   @Column({ name: 'current_price', type: 'varchar' })
   currentPrice: string;

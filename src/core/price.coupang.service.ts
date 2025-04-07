@@ -27,33 +27,33 @@ export class PriceCoupangService {
 
   async coupangPriceControl(jobId: string) {
     const store = this.configService.get<string>('STORE');
-    const crawlingLockKey = `lock:${this.configService.get<string>('STORE')}:coupang:price:crawl`;
-    let acquired = false;
-    let attemptCount = 0;
-    const retryDelay = 60000;
+    // const crawlingLockKey = `lock:${this.configService.get<string>('STORE')}:coupang:price:crawl`;
+    const acquired = false;
+    // const attemptCount = 0;
+    // const retryDelay = 60000;
 
     try {
       console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 크롤링 데이터 삭제`);
       await this.rabbitmqService.send('onch-queue', 'clearOnchProducts', {
         jobId: jobId,
-        type: JobType.PRICE,
+        jobType: JobType.PRICE,
       });
       await this.rabbitmqService.send('coupang-queue', 'clearCoupangComparison', {
         jobId: jobId,
-        type: JobType.PRICE,
+        jobType: JobType.PRICE,
       });
 
       // 크롤링중 새로운 상품 등록 방지
-      while (!acquired) {
-        const result = await this.redis.set(crawlingLockKey, Date.now().toString(), 'NX');
-        acquired = result === 'OK';
-
-        if (!acquired) {
-          attemptCount++;
-          console.log(`${JobType.PRICE}${jobId}: 락 획득 시도 중... (시도 횟수: ${attemptCount})`);
-          await new Promise((resolve) => setTimeout(resolve, retryDelay)); // 대기
-        }
-      }
+      // while (!acquired) {
+      //   const result = await this.redis.set(crawlingLockKey, jobId, 'NX');
+      //   acquired = result === 'OK';
+      //
+      //   if (!acquired) {
+      //     attemptCount++;
+      //     console.log(`${JobType.PRICE}${jobId}: 락 획득 시도 중... (시도 횟수: ${attemptCount})`);
+      //     await new Promise((resolve) => setTimeout(resolve, retryDelay)); // 대기
+      //   }
+      // }
 
       console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 판매상품 크롤링 시작`);
       await Promise.all([
@@ -72,30 +72,45 @@ export class PriceCoupangService {
         // 위너상품의 경우 최소가, 최대가 미충족 상품 제거를 위해 같이 크롤링
         this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
           jobId: jobId,
-          type: JobType.PRICE,
+          jobType: JobType.PRICE,
           data: WinnerStatus.WIN_NOT_SUPPRESSED,
         }),
 
         // 노출 제한 상품도
         this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
           jobId: jobId,
-          type: JobType.PRICE,
+          jobType: JobType.PRICE,
           data: WinnerStatus.ANY_SUPPRESSED,
         }),
       ]);
 
-      // 크롤링 락 해제
-      await this.redis.del(crawlingLockKey);
+      // await this.redis.del(crawlingLockKey);
+
       await this.calculateMarginAndAdjustPrices(jobId, JobType.PRICE);
     } catch (error) {
       console.error(
         `${JobType.ERROR}${JobType.PRICE}${jobId}: 쿠팡 자동가격조절 오류 발생\n`,
         error,
       );
+    } finally {
+      // 크롤링 락 해제 - 에러가 발생하더라도 항상 실행
+      if (acquired) {
+        try {
+          // await this.redis.del(crawlingLockKey);
+          console.log(`${JobType.PRICE}${jobId}: 크롤링 락 해제 완료`);
+        } catch (unlockError) {
+          console.error(
+            `${JobType.ERROR}${JobType.PRICE}${jobId}: 크롤링 락 해제 중 오류 발생\n`,
+            unlockError,
+          );
+        }
+      }
     }
   }
 
   async calculateMarginAndAdjustPrices(jobId: string, jobType: string) {
+    let failCount = 0;
+    let successCount = 0;
     const productsBatch: AdjustData[] = [];
     const deleteProductsMap = new Map<string, CoupangComparisonWithOnchData>();
 
@@ -122,15 +137,16 @@ export class PriceCoupangService {
         console.log(
           `${jobType}${jobId}: 매칭된 아이템을 찾지 못했습니다. ${data.productName}\n${data.onchProduct}`,
         );
+        failCount++;
         continue;
       }
 
+      // 현재 내 상품이 위너인 경우 컨티뉴
       if (
-        +data.winnerPrice > matchedItem.consumerPrice ||
+        +data.winnerFinalPrice > matchedItem.consumerPrice + +data.currentShippingFee ||
         data.winnerVendorId === this.configService.get<string>('COUPANG_VENDOR_ID')
-      ) {
+      )
         continue;
-      }
 
       const adjustment: AdjustData | null = this.calculateMarginAndAdjustPricesProvider.adjustPrice(
         matchedItem,
@@ -149,6 +165,7 @@ export class PriceCoupangService {
       if (adjustment.newPrice === adjustment.currentPrice) continue;
 
       productsBatch.push(adjustment);
+      successCount++;
       if (productsBatch.length >= 50) {
         console.log(`${jobType}${jobId}: 배치 저장`);
         await this.rabbitmqService.send('coupang-queue', 'saveUpdateCoupangItems', {
@@ -175,7 +192,9 @@ export class PriceCoupangService {
     });
 
     const deleteProductsArray = Array.from(deleteProductsMap.values());
-    console.log(`${jobType}${jobId}: 삭제대상 아이템(상품) ${deleteProductsArray.length} 개`);
+    console.log(`${jobType}${jobId}: 총 아이템 ${comparisonData.length}`);
+    console.log(`${jobType}${jobId}: 성공/${successCount} 실패/${failCount}`);
+    console.log(`${jobType}${jobId}: 삭제대상 아이템 ${deleteProductsArray.length} 개`);
 
     if (deleteProductsArray.length > 0)
       await this.deletePoorConditionProducts(jobId, jobType, deleteProductsArray);

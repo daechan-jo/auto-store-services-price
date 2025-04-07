@@ -34,15 +34,38 @@ export class CalculateMarginAndAdjustPricesProvider {
     return profit - wholesalePrice;
   }
 
+  // todo 상대방이 할인이 있는 경우
   adjustPrice(item: OnchItem, data: CoupangComparisonWithOnchData): AdjustData | null {
-    // 새로운 가격은 상대 위너 가격보다 3% 낮게 설정
-    const newPrice = +data.winnerPrice * 0.97;
-    const roundedPrice = Math.round(newPrice / 10) * 10;
-
+    const COMPETITOR_PRICE_DISCOUNT_RATE = 0.97;
     // 목표 최소 순수익(도매가의 10프로)
     const minimumNetProfit = Math.round(item.sellerPrice * 0.1);
+    let newPrice = 0;
+
+    // 상대 배송비가 없고 쿠폰도 없는경우(배송할인)
+    // 상대 배송비가 없고 쿠폰이 있는경우(더블할인)
+    if (
+      (+data.winnerShippingFee === 0 && +data.winnerCoupon === 0) ||
+      (+data.winnerShippingFee === 0 && +data.winnerCoupon !== 0)
+    ) {
+      newPrice = +data.winnerFinalPrice * COMPETITOR_PRICE_DISCOUNT_RATE - +data.currentShippingFee;
+    }
+    // 상대 배송비가 있고 쿠폰이 있는경우(쿠폰할인)
+    if (+data.winnerShippingFee !== 0 && +data.winnerCoupon !== 0) {
+      newPrice = (+data.winnerPrice - +data.winnerCoupon) * COMPETITOR_PRICE_DISCOUNT_RATE;
+    }
+    // 상배 배송비도있고 쿠폰도 없는경우(할인없음)
+    if (+data.winnerShippingFee !== 0 && +data.winnerCoupon === 0) {
+      newPrice = +data.winnerPrice * COMPETITOR_PRICE_DISCOUNT_RATE;
+    }
+
+    // 새로운 가격은 상대 위너 가격보다 3% 낮게 설정
+    // const newPrice = +data.winnerPrice * 0.97;
+    // const roundedPrice = Math.round(newPrice / 10) * 10;
+
+    const roundedPrice = Math.round(newPrice / 10) * 10;
     // 새로운 가격의 순수익
     const newProfit = this.calculateNetProfit(roundedPrice, item.sellerPrice);
+
     // 새로운 생선한 가격의 마진이 목표 마진보다 높다면
     if (newProfit >= minimumNetProfit) {
       return {
