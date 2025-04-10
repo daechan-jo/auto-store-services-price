@@ -133,7 +133,7 @@ export class CalculateMarginAndAdjustPricesProvider {
     // '본품'이라는 단일 아이템 찾기
     if (!matchedItem) {
       matchedItem = data.onchProduct.onchItems.find((item) => {
-        const itemName = item.itemName && item.itemName.trim();
+        const itemName = item.itemName && item.itemName.trim().toLowerCase().replace(/\s+/g, '');
         return (
           itemName === '본품' ||
           itemName === '단일품목' ||

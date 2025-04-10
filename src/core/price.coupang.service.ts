@@ -27,10 +27,6 @@ export class PriceCoupangService {
 
   async coupangPriceControl(jobId: string) {
     const store = this.configService.get<string>('STORE');
-    // const crawlingLockKey = `lock:${this.configService.get<string>('STORE')}:coupang:price:crawl`;
-    const acquired = false;
-    // const attemptCount = 0;
-    // const retryDelay = 60000;
 
     try {
       console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 크롤링 데이터 삭제`);
@@ -42,18 +38,6 @@ export class PriceCoupangService {
         jobId: jobId,
         jobType: JobType.PRICE,
       });
-
-      // 크롤링중 새로운 상품 등록 방지
-      // while (!acquired) {
-      //   const result = await this.redis.set(crawlingLockKey, jobId, 'NX');
-      //   acquired = result === 'OK';
-      //
-      //   if (!acquired) {
-      //     attemptCount++;
-      //     console.log(`${JobType.PRICE}${jobId}: 락 획득 시도 중... (시도 횟수: ${attemptCount})`);
-      //     await new Promise((resolve) => setTimeout(resolve, retryDelay)); // 대기
-      //   }
-      // }
 
       console.log(`${JobType.PRICE}${jobId}: 온채널/쿠팡 판매상품 크롤링 시작`);
       await Promise.all([
@@ -76,15 +60,13 @@ export class PriceCoupangService {
           data: WinnerStatus.WIN_NOT_SUPPRESSED,
         }),
 
-        // 노출 제한 상품도
+        // 노출 제한
         this.rabbitmqService.send('coupang-queue', 'crawlCoupangPriceComparison', {
           jobId: jobId,
           jobType: JobType.PRICE,
           data: WinnerStatus.ANY_SUPPRESSED,
         }),
       ]);
-
-      // await this.redis.del(crawlingLockKey);
 
       await this.calculateMarginAndAdjustPrices(jobId, JobType.PRICE);
     } catch (error) {
@@ -93,18 +75,6 @@ export class PriceCoupangService {
         error,
       );
     } finally {
-      // 크롤링 락 해제 - 에러가 발생하더라도 항상 실행
-      if (acquired) {
-        try {
-          // await this.redis.del(crawlingLockKey);
-          console.log(`${JobType.PRICE}${jobId}: 크롤링 락 해제 완료`);
-        } catch (unlockError) {
-          console.error(
-            `${JobType.ERROR}${JobType.PRICE}${jobId}: 크롤링 락 해제 중 오류 발생\n`,
-            unlockError,
-          );
-        }
-      }
     }
   }
 
@@ -147,6 +117,14 @@ export class PriceCoupangService {
         data.winnerVendorId === this.configService.get<string>('COUPANG_VENDOR_ID')
       )
         continue;
+
+      if (
+        +data.currentPrice < this.configService.get<number>('PRODUCT_MIN_PRICE') ||
+        +data.currentPrice > this.configService.get<number>('PRODUCT_MAX_PRICE')
+      ) {
+        deleteProductsMap.set(data.externalVendorSkuCode, data);
+        continue;
+      }
 
       const adjustment: AdjustData | null = this.calculateMarginAndAdjustPricesProvider.adjustPrice(
         matchedItem,
