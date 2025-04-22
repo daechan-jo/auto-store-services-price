@@ -1,3 +1,5 @@
+## [1.0.6](https://github.com/hush-mart/price/compare/v1.0.5...v1.0.6) (2025-04-22)
+
 ## [1.0.5](https://github.com/daechan-jo/auto-store-services-price/compare/v1.0.4...v1.0.5) (2025-04-10)
 
 ## [1.0.4](https://github.com/daechan-jo/auto-store-services-price/compare/v1.0.3...v1.0.4) (2025-04-07)
