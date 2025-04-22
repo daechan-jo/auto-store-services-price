@@ -40,10 +40,10 @@ export class PriceService {
         setTimeout(() => this.initCoupangPriceControl(currentJobId, retryCount + 1), 3000);
       } else {
         await this.rabbitmqService.emit('mail-queue', 'sendErrorMail', {
-          jobType: JobType.PRICE,
-          store: this.configService.get<string>('STORE'),
           jobId: currentJobId,
-          message: error.message,
+          jobType: JobType.PRICE,
+          jobName: 'Price-service',
+          message: error,
         });
         console.error(`${JobType.ERROR}${JobType.PRICE}${currentJobId}: 재시도 횟수 초과`);
       }

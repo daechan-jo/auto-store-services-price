@@ -181,9 +181,16 @@ export class PriceCoupangService {
   async deletePoorConditionProducts(
     jobId: string,
     jobType: string,
-    deleteProducts: CoupangComparisonWithOnchData[],
+    data: CoupangComparisonWithOnchData[],
   ) {
     console.log(`${jobType}${jobId}: 조건미충족 상품 삭제 시작`);
+
+    const deleteProducts = data.map((product) => {
+      return {
+        sellerProductId: String(product.vendorInventoryId),
+        productName: product.productName,
+      };
+    });
 
     console.log(`${jobType}${jobId}: ✉️onch-deleteProducts`);
     await this.rabbitmqService.emit('onch-queue', 'deleteProducts', {
